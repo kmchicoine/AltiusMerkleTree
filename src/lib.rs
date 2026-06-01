@@ -166,6 +166,25 @@ impl MerkleTree {
 
         Some(MerkleProof { siblings, positions })
     }
+
+    pub fn verify_proof<T: AsRef<[u8]>>(
+        item: T,
+        _index: usize,
+        proof: &MerkleProof,
+        expected_root: Hash,
+    ) -> bool {
+        let mut current_hash = hash_leaf(item.as_ref());
+
+        for (sibling, is_left) in proof.siblings.iter().zip(proof.positions.iter()) {
+            current_hash = if *is_left {
+                hash_parent(current_hash, *sibling)
+            } else {
+                hash_parent(*sibling, current_hash)
+            };
+        }
+
+        current_hash == expected_root
+    }
 }
 
 #[cfg(test)]
@@ -321,5 +340,88 @@ mod tests {
         
         let proof3 = tree.proof(3).unwrap();
         assert_eq!(proof3.siblings.len(), 2);
+    }
+
+    #[test]
+    fn test_verify_proof_single_leaf() {
+        let tree = MerkleTree::new(&["a"]);
+        let root = tree.root().unwrap();
+        let proof = tree.proof(0).unwrap();
+        
+        assert!(MerkleTree::verify_proof("a", 0, &proof, root));
+        assert!(!MerkleTree::verify_proof("b", 0, &proof, root));
+    }
+
+    #[test]
+    fn test_verify_proof_two_leaves() {
+        let tree = MerkleTree::new(&["a", "b"]);
+        let root = tree.root().unwrap();
+        
+        let proof0 = tree.proof(0).unwrap();
+        assert!(MerkleTree::verify_proof("a", 0, &proof0, root));
+        assert!(!MerkleTree::verify_proof("b", 0, &proof0, root));
+        
+        let proof1 = tree.proof(1).unwrap();
+        assert!(MerkleTree::verify_proof("b", 1, &proof1, root));
+        assert!(!MerkleTree::verify_proof("a", 1, &proof1, root));
+    }
+
+    #[test]
+    fn test_verify_proof_four_leaves() {
+        let items = &["a", "b", "c", "d"];
+        let tree = MerkleTree::new(items);
+        let root = tree.root().unwrap();
+
+        for (idx, item) in items.iter().enumerate() {
+            let proof = tree.proof(idx).unwrap();
+            assert!(MerkleTree::verify_proof(item, idx, &proof, root));
+        }
+    }
+
+    #[test]
+    fn test_verify_proof_wrong_data() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        let root = tree.root().unwrap();
+        let proof = tree.proof(0).unwrap();
+
+        assert!(!MerkleTree::verify_proof("wrong", 0, &proof, root));
+    }
+
+    #[test]
+    fn test_verify_proof_tampered() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        let root = tree.root().unwrap();
+
+        let mut proof = tree.proof(0).unwrap();
+        if !proof.siblings.is_empty() {
+            proof.siblings[0][0] ^= 0xFF;
+        }
+
+        assert!(!MerkleTree::verify_proof("a", 0, &proof, root));
+    }
+
+    #[test]
+    fn test_verify_proof_duplicate_values() {
+        let items = &["a", "a", "b", "b"];
+        let tree = MerkleTree::new(items);
+        let root = tree.root().unwrap();
+
+        for (idx, item) in items.iter().enumerate() {
+            let proof = tree.proof(idx).unwrap();
+            assert!(MerkleTree::verify_proof(item, idx, &proof, root));
+        }
+    }
+
+    #[test]
+    fn test_verify_proof_large_tree() {
+        let items: Vec<String> = (0..256).map(|i| format!("item_{}", i)).collect();
+        let item_refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+        let tree = MerkleTree::new(&item_refs);
+        let root = tree.root().unwrap();
+
+        for idx in [0, 50, 100, 200, 255] {
+            let proof = tree.proof(idx).unwrap();
+            assert!(MerkleTree::verify_proof(item_refs[idx], idx, &proof, root));
+        }
     }
 }
