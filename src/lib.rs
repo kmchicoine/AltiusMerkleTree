@@ -1,15 +1,38 @@
 use sha2::{Digest, Sha256};
+use std::fmt;
+use std::error::Error;
 
 pub type Hash = [u8; 32];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum MerkleError {
+    InvalidIndex,
+    EmptyTree,
+    InvalidHex(String),
+}
+
+impl fmt::Display for MerkleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MerkleError::InvalidIndex => write!(f, "Invalid index"),
+            MerkleError::EmptyTree => write!(f, "Empty tree"),
+            MerkleError::InvalidHex(msg) => write!(f, "Invalid hex: {}", msg),
+        }
+    }
+}
+
+impl Error for MerkleError {}
+
+pub type Result<T> = std::result::Result<T, MerkleError>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MerkleTree {
     // flattened binary tree stored in an array
     nodes: Vec<Hash>,
     leaf_count: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MerkleProof {
     pub siblings: Vec<Hash>,
     // true for right sibling, false for left sibling
@@ -38,6 +61,44 @@ fn hash_parent(left: Hash, right: Hash) -> Hash {
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&result[..]);
     hash
+}
+
+pub fn hash_to_hex(hash: &Hash) -> String {
+    hash.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+pub fn hex_to_hash(hex: &str) -> Result<Hash> {
+    if hex.len() != 64 {
+        return Err(MerkleError::InvalidHex("Invalid hex length".to_string()));
+    }
+
+    let mut hash = [0u8; 32];
+    for i in 0..32 {
+        let hex_byte = &hex[i * 2..i * 2 + 2];
+        match u8::from_str_radix(hex_byte, 16) {
+            Ok(byte) => hash[i] = byte,
+            Err(_) => return Err(MerkleError::InvalidHex("Invalid hex characters".to_string())),
+        }
+    }
+
+    Ok(hash)
+}
+
+impl MerkleProof {
+    pub fn to_hex_siblings(&self) -> Vec<String> {
+        self.siblings.iter().map(hash_to_hex).collect()
+    }
+
+    pub fn from_hex_siblings(hex_siblings: &[String], positions: Vec<bool>) -> Result<Self> {
+        let mut siblings = Vec::new();
+        for h in hex_siblings {
+            siblings.push(hex_to_hash(h)?);
+        }
+        Ok(MerkleProof {
+            siblings,
+            positions,
+        })
+    }
 }
 
 impl MerkleTree {
@@ -106,12 +167,16 @@ impl MerkleTree {
         MerkleTree { nodes, leaf_count }
     }
 
-    pub fn root(&self) -> Option<Hash> {
+    pub fn root(&self) -> Result<Hash> {
         if self.nodes.is_empty() {
-            None
+            Err(MerkleError::EmptyTree)
         } else {
-            Some(self.nodes[0])
+            Ok(self.nodes[0])
         }
+    }
+
+    pub fn root_hex(&self) -> Result<String> {
+        self.root().map(|h| hash_to_hex(&h))
     }
 
     pub fn leaf_count(&self) -> usize {
@@ -122,18 +187,18 @@ impl MerkleTree {
         self.leaf_count == 0
     }
 
-    pub fn proof(&self, index: usize) -> Option<MerkleProof> {
+    pub fn proof(&self, index: usize) -> Result<MerkleProof> {
         if index >= self.leaf_count {
-            return None;
+            return Err(MerkleError::InvalidIndex);
         }
 
         if self.is_empty() {
-            return None;
+            return Err(MerkleError::EmptyTree);
         }
 
         // Special case: single leaf has no proof (no siblings)
         if self.leaf_count == 1 {
-            return Some(MerkleProof {
+            return Ok(MerkleProof {
                 siblings: Vec::new(),
                 positions: Vec::new(),
             });
@@ -164,7 +229,7 @@ impl MerkleTree {
             current_idx = parent_idx;
         }
 
-        Some(MerkleProof { siblings, positions })
+        Ok(MerkleProof { siblings, positions })
     }
 
     pub fn verify_proof<T: AsRef<[u8]>>(
@@ -253,7 +318,7 @@ mod tests {
     #[test]
     fn test_empty_tree_root() {
         let tree = MerkleTree::new::<&str>(&[]);
-        assert!(tree.root().is_none());
+        assert!(tree.root().is_err());
         assert!(tree.is_empty());
         assert_eq!(tree.leaf_count(), 0);
     }
@@ -262,7 +327,7 @@ mod tests {
     fn test_single_leaf_root() {
         let tree = MerkleTree::new(&["hello"]);
         let expected_root = hash_leaf(b"hello");
-        assert_eq!(tree.root(), Some(expected_root));
+        assert_eq!(tree.root().unwrap(), expected_root);
         assert!(!tree.is_empty());
         assert_eq!(tree.leaf_count(), 1);
     }
@@ -273,7 +338,7 @@ mod tests {
         let left_hash = hash_leaf(b"hello");
         let right_hash = hash_leaf(b"world");
         let expected_root = hash_parent(left_hash, right_hash);
-        assert_eq!(tree.root(), Some(expected_root));
+        assert_eq!(tree.root().unwrap(), expected_root);
         assert_eq!(tree.leaf_count(), 2);
     }
 
@@ -282,24 +347,24 @@ mod tests {
         let tree4 = MerkleTree::new(&["a", "b", "c", "d"]);
         assert_eq!(tree4.leaf_count(), 4);
         assert!(!tree4.is_empty());
-        assert!(tree4.root().is_some());
+        assert!(tree4.root().is_ok());
 
         let tree_empty = MerkleTree::new::<&str>(&[]);
         assert_eq!(tree_empty.leaf_count(), 0);
         assert!(tree_empty.is_empty());
-        assert!(tree_empty.root().is_none());
+        assert!(tree_empty.root().is_err());
     }
 
     #[test]
     fn test_proof_invalid_index() {
         let tree = MerkleTree::new(&["a", "b"]);
-        assert!(tree.proof(5).is_none());
+        assert!(tree.proof(5).is_err());
     }
 
     #[test]
     fn test_proof_empty_tree() {
         let tree = MerkleTree::new::<&str>(&[]);
-        assert!(tree.proof(0).is_none());
+        assert!(tree.proof(0).is_err());
     }
 
     #[test]
@@ -434,7 +499,7 @@ mod tests {
         let tree2 = MerkleTree::new(items2);
 
         assert_eq!(tree1.root(), tree2.root());
-        assert_eq!(tree1.len(), tree2.len());
+        assert_eq!(tree1.leaf_count(), tree2.leaf_count());
 
         for idx in 0..3 {
             let proof1 = tree1.proof(idx).unwrap();
@@ -487,7 +552,7 @@ mod tests {
 
         let tree = MerkleTree::new(&item_refs);
 
-        assert_eq!(tree.len(), 1024);
+        assert_eq!(tree.leaf_count(), 1024);
         let root = tree.root().unwrap();
 
         for idx in [0, 100, 512, 900, 1023] {
@@ -500,10 +565,10 @@ mod tests {
     fn test_odd_leaf_count() {
         let tree = MerkleTree::new(&["a", "b", "c"]);
         let root = tree.root();
-        assert!(root.is_some());
+        assert!(root.is_ok());
 
         let tree2 = MerkleTree::new(&["a", "b", "c", "c"]);
-        assert!(tree2.root().is_some());
+        assert!(tree2.root().is_ok());
     }
 
     #[test]
@@ -517,4 +582,115 @@ mod tests {
             assert!(MerkleTree::verify_proof(&item[..], idx, &proof, root));
         }
     }
+
+    #[test]
+    fn test_hash_to_hex() {
+        let hash = hash_leaf(b"test");
+        let hex = hash_to_hex(&hash);
+
+        assert_eq!(hex.len(), 64);
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_hex_to_hash_roundtrip() {
+        let original = hash_leaf(b"test");
+        let hex = hash_to_hex(&original);
+        let recovered = hex_to_hash(&hex).unwrap();
+
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn test_hex_to_hash_invalid() {
+        assert!(hex_to_hash("invalid").is_err());
+        assert!(hex_to_hash("abcd").is_err());
+        assert!(hex_to_hash("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_err());
+    }
+
+    #[test]
+    fn test_root_hex() {
+        let tree = MerkleTree::new(&["a", "b"]);
+        let hex = tree.root_hex();
+
+        assert!(hex.is_ok());
+        let hex_str = hex.unwrap();
+        assert_eq!(hex_str.len(), 64);
+        assert!(hex_str.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_proof_to_hex_siblings() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        let proof = tree.proof(0).unwrap();
+        let hex_siblings = proof.to_hex_siblings();
+
+        assert_eq!(hex_siblings.len(), proof.siblings.len());
+        for hex in hex_siblings {
+            assert_eq!(hex.len(), 64);
+            assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
+    fn test_proof_from_hex_siblings() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        let original_proof = tree.proof(0).unwrap();
+        let hex_siblings = original_proof.to_hex_siblings();
+
+        let recovered = MerkleProof::from_hex_siblings(&hex_siblings, original_proof.positions.clone()).unwrap();
+
+        assert_eq!(recovered.siblings.len(), original_proof.siblings.len());
+        for (s1, s2) in recovered.siblings.iter().zip(original_proof.siblings.iter()) {
+            assert_eq!(s1, s2);
+        }
+    }
+
+    #[test]
+    fn test_tree_serialization() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        let json = serde_json::to_string(&tree).expect("Failed to serialize");
+        let deserialized: MerkleTree = serde_json::from_str(&json).expect("Failed to deserialize");
+        
+        assert_eq!(tree.root(), deserialized.root());
+        assert_eq!(tree.leaf_count(), deserialized.leaf_count());
+    }
+
+    #[test]
+    fn test_proof_serialization() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        let proof = tree.proof(1).unwrap();
+        let json = serde_json::to_string(&proof).expect("Failed to serialize");
+        let deserialized: MerkleProof = serde_json::from_str(&json).expect("Failed to deserialize");
+        
+        assert_eq!(proof.siblings.len(), deserialized.siblings.len());
+        assert_eq!(proof.positions, deserialized.positions);
+    }
+
+    #[test]
+    fn test_error_invalid_index() {
+        let tree = MerkleTree::new(&["a", "b"]);
+        match tree.proof(10) {
+            Err(MerkleError::InvalidIndex) => {},
+            _ => panic!("Expected InvalidIndex error"),
+        }
+    }
+
+    #[test]
+    fn test_error_empty_tree() {
+        let tree: MerkleTree = MerkleTree::new::<&str>(&[]);
+        match tree.root() {
+            Err(MerkleError::EmptyTree) => {},
+            _ => panic!("Expected EmptyTree error"),
+        }
+    }
+
+    #[test]
+    fn test_error_invalid_hex() {
+        match hex_to_hash("not_valid_hex") {
+            Err(MerkleError::InvalidHex(_)) => {},
+            _ => panic!("Expected InvalidHex error"),
+        }
+    }
 }
+
