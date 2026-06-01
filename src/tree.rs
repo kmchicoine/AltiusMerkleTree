@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_tree_root() {
+    fn empty_tree_has_no_root() {
         let tree = MerkleTree::new::<&str>(&[]);
         assert!(tree.root().is_err());
         assert!(tree.is_empty());
@@ -213,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn test_single_leaf_root() {
+    fn single_leaf_root_is_leaf_hash() {
         let tree = MerkleTree::new(&["hello"]);
         let expected_root = hash_leaf(b"hello");
         assert_eq!(tree.root().unwrap(), expected_root);
@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_two_leaf_root() {
+    fn two_leaf_tree_root_is_parent_hash() {
         let tree = MerkleTree::new(&["hello", "world"]);
         let left_hash = hash_leaf(b"hello");
         let right_hash = hash_leaf(b"world");
@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proof_invalid_index() {
+    fn proof_fails_for_wrong_index() {
         let tree = MerkleTree::new(&["a", "b"]);
         assert!(tree.proof(5).is_err());
     }
@@ -321,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_proof_four_leaves() {
+    fn proof_verifies_for_each_leaf() {
         let items = &["a", "b", "c", "d"];
         let tree = MerkleTree::new(items);
         let root = tree.root().unwrap();
@@ -333,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_proof_wrong_data() {
+    fn proof_fails_for_wrong_leaf() {
         let tree = MerkleTree::new(&["a", "b", "c", "d"]);
         let root = tree.root().unwrap();
         let proof = tree.proof(0).unwrap();
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_proof_tampered() {
+    fn proof_fails_when_proof_is_tampered() {
         let tree = MerkleTree::new(&["a", "b", "c", "d"]);
         let root = tree.root().unwrap();
 
@@ -355,7 +355,16 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_proof_duplicate_values() {
+    fn proof_fails_for_wrong_root() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        let proof = tree.proof(0).unwrap();
+
+        let wrong_root = [0u8; 32];
+        assert!(!MerkleTree::verify_proof("a", 0, &proof, wrong_root));
+    }
+
+    #[test]
+    fn duplicate_values_can_still_be_proven_by_index() {
         let items = &["a", "a", "b", "b"];
         let tree = MerkleTree::new(items);
         let root = tree.root().unwrap();
@@ -367,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_proof_large_tree() {
+    fn large_tree_builds_and_verifies() {
         let items: Vec<String> = (0..256).map(|i| format!("item_{}", i)).collect();
         let item_refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
         let tree = MerkleTree::new(&item_refs);
@@ -451,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn test_odd_leaf_count() {
+    fn odd_leaf_count_is_handled_deterministically() {
         let tree = MerkleTree::new(&["a", "b", "c"]);
         let root = tree.root();
         assert!(root.is_ok());
