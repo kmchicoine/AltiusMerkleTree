@@ -424,4 +424,97 @@ mod tests {
             assert!(MerkleTree::verify_proof(item_refs[idx], idx, &proof, root));
         }
     }
+
+    #[test]
+    fn test_consistency() {
+        let items1 = &["a", "b", "c"];
+        let items2 = &["a", "b", "c"];
+
+        let tree1 = MerkleTree::new(items1);
+        let tree2 = MerkleTree::new(items2);
+
+        assert_eq!(tree1.root(), tree2.root());
+        assert_eq!(tree1.len(), tree2.len());
+
+        for idx in 0..3 {
+            let proof1 = tree1.proof(idx).unwrap();
+            let proof2 = tree2.proof(idx).unwrap();
+
+            assert_eq!(proof1.siblings.len(), proof2.siblings.len());
+            for (s1, s2) in proof1.siblings.iter().zip(proof2.siblings.iter()) {
+                assert_eq!(s1, s2);
+            }
+        }
+    }
+
+    #[test]
+    fn test_binary_items() {
+        let items = &[b"binary1", b"binary2", b"binary3"];
+        let tree = MerkleTree::new(items);
+
+        let root = tree.root().unwrap();
+
+        for (idx, item) in items.iter().enumerate() {
+            let proof = tree.proof(idx).unwrap();
+            assert!(MerkleTree::verify_proof(&item[..], idx, &proof, root));
+        }
+    }
+
+    #[test]
+    fn test_string_types() {
+        let items: Vec<String> = vec![
+            "hello".to_string(),
+            "world".to_string(),
+            "merkle".to_string(),
+            "tree".to_string(),
+        ];
+
+        let item_refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+        let tree = MerkleTree::new(&item_refs);
+
+        let root = tree.root().unwrap();
+
+        for (idx, item) in item_refs.iter().enumerate() {
+            let proof = tree.proof(idx).unwrap();
+            assert!(MerkleTree::verify_proof(item, idx, &proof, root));
+        }
+    }
+
+    #[test]
+    fn test_very_large_tree() {
+        let items: Vec<String> = (0..1024).map(|i| format!("item_{}", i)).collect();
+        let item_refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+
+        let tree = MerkleTree::new(&item_refs);
+
+        assert_eq!(tree.len(), 1024);
+        let root = tree.root().unwrap();
+
+        for idx in [0, 100, 512, 900, 1023] {
+            let proof = tree.proof(idx).unwrap();
+            assert!(MerkleTree::verify_proof(item_refs[idx], idx, &proof, root));
+        }
+    }
+
+    #[test]
+    fn test_odd_leaf_count() {
+        let tree = MerkleTree::new(&["a", "b", "c"]);
+        let root = tree.root();
+        assert!(root.is_some());
+
+        let tree2 = MerkleTree::new(&["a", "b", "c", "c"]);
+        assert!(tree2.root().is_some());
+    }
+
+    #[test]
+    fn test_single_byte_items() {
+        let items = &[b"a", b"b", b"c"];
+        let tree = MerkleTree::new(items);
+        let root = tree.root().unwrap();
+
+        for (idx, item) in items.iter().enumerate() {
+            let proof = tree.proof(idx).unwrap();
+            assert!(MerkleTree::verify_proof(&item[..], idx, &proof, root));
+        }
+    }
 }
