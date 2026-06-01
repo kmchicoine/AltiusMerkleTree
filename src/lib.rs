@@ -106,6 +106,22 @@ impl MerkleTree {
 
         MerkleTree { nodes, leaf_count }
     }
+
+    pub fn root(&self) -> Option<Hash> {
+        if self.nodes.is_empty() {
+            None
+        } else {
+            Some(self.nodes[0])
+        }
+    }
+
+    pub fn leaf_count(&self) -> usize {
+        self.leaf_count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.leaf_count == 0
+    }
 }
 
 #[cfg(test)]
@@ -169,5 +185,45 @@ mod tests {
     fn test_tree_creation_four() {
         let tree = MerkleTree::new(&["a", "b", "c", "d"]);
         assert_eq!(tree.leaf_count, 4);
+    }
+
+    #[test]
+    fn test_empty_tree_root() {
+        let tree = MerkleTree::new::<&str>(&[]);
+        assert!(tree.root().is_none());
+        assert!(tree.is_empty());
+        assert_eq!(tree.leaf_count(), 0);
+    }
+
+    #[test]
+    fn test_single_leaf_root() {
+        let tree = MerkleTree::new(&["hello"]);
+        let expected_root = hash_leaf(b"hello");
+        assert_eq!(tree.root(), Some(expected_root));
+        assert!(!tree.is_empty());
+        assert_eq!(tree.leaf_count(), 1);
+    }
+
+    #[test]
+    fn test_two_leaf_root() {
+        let tree = MerkleTree::new(&["hello", "world"]);
+        let left_hash = hash_leaf(b"hello");
+        let right_hash = hash_leaf(b"world");
+        let expected_root = hash_parent(left_hash, right_hash);
+        assert_eq!(tree.root(), Some(expected_root));
+        assert_eq!(tree.leaf_count(), 2);
+    }
+
+    #[test]
+    fn test_metadata() {
+        let tree4 = MerkleTree::new(&["a", "b", "c", "d"]);
+        assert_eq!(tree4.leaf_count(), 4);
+        assert!(!tree4.is_empty());
+        assert!(tree4.root().is_some());
+
+        let tree_empty = MerkleTree::new::<&str>(&[]);
+        assert_eq!(tree_empty.leaf_count(), 0);
+        assert!(tree_empty.is_empty());
+        assert!(tree_empty.root().is_none());
     }
 }
