@@ -12,7 +12,6 @@ pub struct MerkleTree {
 #[derive(Debug, Clone)]
 pub struct MerkleProof {
     pub siblings: Vec<Hash>,
-    // binary tree implementation for simplicity
     // true for right sibling, false for left sibling
     pub positions: Vec<bool>,
 }
@@ -122,6 +121,51 @@ impl MerkleTree {
     pub fn is_empty(&self) -> bool {
         self.leaf_count == 0
     }
+
+    pub fn proof(&self, index: usize) -> Option<MerkleProof> {
+        if index >= self.leaf_count {
+            return None;
+        }
+
+        if self.is_empty() {
+            return None;
+        }
+
+        // Special case: single leaf has no proof (no siblings)
+        if self.leaf_count == 1 {
+            return Some(MerkleProof {
+                siblings: Vec::new(),
+                positions: Vec::new(),
+            });
+        }
+
+        let leaf_capacity = (self.leaf_count as u32).next_power_of_two() as usize;
+        let height = leaf_capacity.trailing_zeros() as usize;
+        let leaf_start = (1 << height) - 1;
+
+        let mut current_idx = leaf_start + index;
+        let mut siblings = Vec::new();
+        let mut positions = Vec::new();
+
+        while current_idx > 0 {
+            let parent_idx = (current_idx - 1) / 2;
+            let sibling_idx = if current_idx % 2 == 1 {
+                current_idx + 1
+            } else {
+                current_idx - 1
+            };
+
+            if sibling_idx < self.nodes.len() {
+                let is_left = current_idx % 2 == 1;
+                siblings.push(self.nodes[sibling_idx]);
+                positions.push(is_left);
+            }
+
+            current_idx = parent_idx;
+        }
+
+        Some(MerkleProof { siblings, positions })
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +269,57 @@ mod tests {
         assert_eq!(tree_empty.leaf_count(), 0);
         assert!(tree_empty.is_empty());
         assert!(tree_empty.root().is_none());
+    }
+
+    #[test]
+    fn test_proof_invalid_index() {
+        let tree = MerkleTree::new(&["a", "b"]);
+        assert!(tree.proof(5).is_none());
+    }
+
+    #[test]
+    fn test_proof_empty_tree() {
+        let tree = MerkleTree::new::<&str>(&[]);
+        assert!(tree.proof(0).is_none());
+    }
+
+    #[test]
+    fn test_proof_single_leaf() {
+        let tree = MerkleTree::new(&["a"]);
+        let proof = tree.proof(0).unwrap();
+        assert_eq!(proof.siblings.len(), 0);
+        assert_eq!(proof.positions.len(), 0);
+    }
+
+    #[test]
+    fn test_proof_two_leaves() {
+        let tree = MerkleTree::new(&["a", "b"]);
+        
+        let proof0 = tree.proof(0).unwrap();
+        assert_eq!(proof0.siblings.len(), 1);
+        assert_eq!(proof0.positions.len(), 1);
+        assert_eq!(proof0.positions[0], true);
+
+        let proof1 = tree.proof(1).unwrap();
+        assert_eq!(proof1.siblings.len(), 1);
+        assert_eq!(proof1.positions.len(), 1);
+        assert_eq!(proof1.positions[0], false);
+    }
+
+    #[test]
+    fn test_proof_four_leaves() {
+        let tree = MerkleTree::new(&["a", "b", "c", "d"]);
+        
+        let proof0 = tree.proof(0).unwrap();
+        assert_eq!(proof0.siblings.len(), 2);
+        
+        let proof1 = tree.proof(1).unwrap();
+        assert_eq!(proof1.siblings.len(), 2);
+        
+        let proof2 = tree.proof(2).unwrap();
+        assert_eq!(proof2.siblings.len(), 2);
+        
+        let proof3 = tree.proof(3).unwrap();
+        assert_eq!(proof3.siblings.len(), 2);
     }
 }
