@@ -1,5 +1,5 @@
+use altius_merkle_tree::MerkleTree;
 use proptest::prelude::*;
-use AltiusMerkleTree::MerkleTree;
 
 proptest! {
     #[test]
